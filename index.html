@@ -36,32 +36,31 @@
                     Analyze
                 </button>
             </div>
+            <!-- Progress Bar -->
+            <div id="progressContainer" class="mt-4 hidden">
+                <div class="flex justify-between mb-1">
+                    <span class="text-xs font-semibold text-slate-600" id="progressLabel">Analyzing...</span>
+                    <span class="text-xs font-semibold text-slate-600" id="progressPercent">0%</span>
+                </div>
+                <div class="w-full bg-slate-200 rounded-full h-1.5">
+                    <div id="progressBar" class="bg-red-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+            </div>
         </div>
 
         <!-- Stats Dashboard -->
         <div id="statsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 hidden">
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Packages</p>
                 <p id="statTotal" class="text-2xl font-bold text-slate-900">0</p>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Qualifying</p>
                 <p id="statQualifying" class="text-2xl font-bold text-green-600">0</p>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-green-500">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-green-500 text-center">
                 <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Estimated Value</p>
                 <p id="statValue" class="text-2xl font-bold text-slate-900">$0</p>
-            </div>
-        </div>
-
-        <!-- Progress Log -->
-        <div class="bg-slate-900 rounded-xl p-4 mb-6 hidden" id="logContainer">
-            <div class="flex justify-between items-center mb-2">
-                <span class="text-xs font-mono text-slate-400 uppercase">System Log</span>
-                <span id="progressPercent" class="text-xs font-mono text-slate-400">0%</span>
-            </div>
-            <div id="log" class="font-mono text-sm text-green-400 h-48 overflow-y-auto space-y-1">
-                <div>Waiting for input...</div>
             </div>
         </div>
 
@@ -71,7 +70,7 @@
                 <thead class="bg-slate-50 border-b border-slate-200">
                     <tr>
                         <th class="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Package</th>
-                        <th class="px-6 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Downloads</th>
+                        <th class="px-6 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Downloads (Last Month)</th>
                     </tr>
                 </thead>
                 <tbody id="resultsBody" class="divide-y divide-slate-100">
@@ -84,8 +83,10 @@
     <script>
         const usernameInput = document.getElementById('username');
         const runBtn = document.getElementById('runBtn');
-        const logEl = document.getElementById('log');
-        const logContainer = document.getElementById('logContainer');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressLabel = document.getElementById('progressLabel');
         const resultsContainer = document.getElementById('resultsContainer');
         const resultsBody = document.getElementById('resultsBody');
         const statsGrid = document.getElementById('statsGrid');
@@ -93,14 +94,23 @@
         const statTotal = document.getElementById('statTotal');
         const statQualifying = document.getElementById('statQualifying');
         const statValue = document.getElementById('statValue');
-        const progressPercent = document.getElementById('progressPercent');
 
-        function updateLog(msg, isMatch = false) {
-            const div = document.createElement('div');
-            if (isMatch) div.className = 'text-yellow-300 font-bold';
-            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            logEl.appendChild(div);
-            logEl.scrollTop = logEl.scrollHeight;
+        let qualifyingPackages = [];
+
+        function renderResults() {
+            // Sort by downloads descending
+            qualifyingPackages.sort((a, b) => b.downloads - a.downloads);
+            
+            resultsBody.innerHTML = qualifyingPackages.map(pkg => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="px-6 py-4 font-medium text-slate-900">${pkg.name}</td>
+                    <td class="px-6 py-4 text-right text-slate-600 font-mono text-sm">${pkg.downloads.toLocaleString()}</td>
+                </tr>
+            `).join('');
+            
+            if (qualifyingPackages.length > 0) {
+                resultsContainer.classList.remove('hidden');
+            }
         }
 
         async function analyzeUser() {
@@ -109,20 +119,19 @@
 
             // Reset UI
             runBtn.disabled = true;
-            logContainer.classList.remove('hidden');
+            progressContainer.classList.remove('hidden');
             statsGrid.classList.remove('hidden');
             resultsContainer.classList.add('hidden');
             resultsBody.innerHTML = '';
-            logEl.innerHTML = '';
+            qualifyingPackages = [];
             
             let allPackages = [];
-            let qualifyingCount = 0;
             let from = 0;
             const size = 250;
             let total = 0;
 
             try {
-                updateLog(`Fetching package list for ${username}...`);
+                progressLabel.textContent = "Fetching package list...";
                 
                 // 1. Pagination loop for names
                 do {
@@ -137,22 +146,20 @@
                     from += size;
                     
                     statTotal.textContent = allPackages.length;
-                    updateLog(`Retrieved ${allPackages.length} / ${total} names...`);
                 } while (allPackages.length < total);
 
-                updateLog(`Starting deep analysis of ${allPackages.length} packages...`);
+                progressLabel.textContent = `Analyzing ${allPackages.length} packages...`;
 
                 // 2. Iterate and filter
                 for (let i = 0; i < allPackages.length; i++) {
                     const pkg = allPackages[i];
                     const name = pkg.package.name;
                     
-                    // Update progress UI
                     const percent = Math.round(((i + 1) / allPackages.length) * 100);
+                    progressBar.style.width = `${percent}%`;
                     progressPercent.textContent = `${percent}%`;
 
                     try {
-                        // Fetch full metadata (README and package.json)
                         const detailRes = await fetch(`https://registry.npmjs.org/${name}`);
                         const detailData = await detailRes.json();
                         
@@ -167,39 +174,29 @@
                             JSON.stringify(pkgJson).toLowerCase().includes('tidelift');
 
                         if (hasTidelift) {
-                            // Fetch downloads (last month)
                             const statsRes = await fetch(`https://api.npmjs.org/downloads/point/last-month/${name}`);
                             const statsData = await statsRes.json();
                             const downloads = statsData.downloads || 0;
 
                             if (downloads > 10000) {
-                                qualifyingCount++;
-                                updateLog(`MATCH: ${name} (>10k downloads)`, true);
+                                qualifyingPackages.push({ name, downloads });
                                 
-                                // Update Stats
-                                statQualifying.textContent = qualifyingCount;
-                                statValue.textContent = `$${(qualifyingCount * 50).toLocaleString()}`;
+                                statQualifying.textContent = qualifyingPackages.length;
+                                statValue.textContent = `$${(qualifyingPackages.length * 50).toLocaleString()}`;
                                 
-                                // Show Table and add row
-                                resultsContainer.classList.remove('hidden');
-                                const row = `
-                                    <tr class="hover:bg-slate-50 transition-colors">
-                                        <td class="px-6 py-4 font-medium text-slate-900">${name}</td>
-                                        <td class="px-6 py-4 text-right text-slate-600 font-mono text-sm">${downloads.toLocaleString()}</td>
-                                    </tr>
-                                `;
-                                resultsBody.insertAdjacentHTML('beforeend', row);
+                                renderResults();
                             }
                         }
                     } catch (e) {
-                        updateLog(`Skipped ${name}: network error`);
+                        // Silent fail on individual package error to keep going
                     }
                 }
 
-                updateLog(`Analysis complete. Found ${qualifyingCount} qualifying packages.`);
+                progressLabel.textContent = "Analysis complete";
 
             } catch (err) {
-                updateLog(`FATAL ERROR: ${err.message}`);
+                progressLabel.textContent = "Error occurred";
+                console.error(err);
             } finally {
                 runBtn.disabled = false;
             }
